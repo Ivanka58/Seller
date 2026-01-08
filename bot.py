@@ -8,17 +8,15 @@ from dotenv import load_dotenv
 load_dotenv()
 
 TOKEN = os.getenv("TG_TOKEN")
-CHANNEL_ID = os.getenv("CHANNEL_ID")
+CHANNEL_ID = os.getenv("CHANNEL_ID") # Убедись, что это ID канала (начинается с -100)
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
 # --- ХРАНИЛИЩЕ ДАННЫХ ---
-user_data = {}  # Для сбора фото и текста
-# Лимиты: {user_id: next_allowed_post_number}
+user_data = {}  
 user_limits = {} 
-# Глобальный счетчик опубликованных постов
-global_post_count = 0
+global_msg_count = 0 # Общий счетчик всех сообщений в канале
 
 # --- СЕРВЕР ДЛЯ ПОРТА RENDER ---
 @app.route('/')
@@ -46,16 +44,26 @@ def get_confirm_kb():
     kb.add(types.KeyboardButton("Готово ☑️"), types.KeyboardButton("Изменить"))
     return kb
 
+# --- МОНИТОРИНГ КАНАЛА ---
+
+# Этот обработчик ловит ВСЕ сообщения в канале, где бот является админом
+@bot.channel_post_handler()
+def listen_channel(message):
+    global global_msg_count
+    # Проверяем, что сообщение именно из нашего целевого канала
+    if str(message.chat.id) == str(CHANNEL_ID):
+        global_msg_count += 1
+        print(f"Счетчик канала увеличился: {global_msg_count}")
+
 # --- ФУНКЦИИ ПРОВЕРКИ ЛИМИТА ---
 
 def is_user_limited(user_id):
-    """Проверяет, может ли пользователь отправить пост сейчас."""
     if user_id not in user_limits:
         return False, 0
     
     needed_count = user_limits[user_id]
-    if global_post_count < needed_count:
-        remaining = needed_count - global_post_count
+    if global_msg_count < needed_count:
+        remaining = needed_count - global_msg_count
         return True, remaining
     return False, 0
 
@@ -67,7 +75,7 @@ def send_welcome(message):
     user_data[chat_id] = {'photos': [], 'text': None}
     bot.send_message(
         chat_id, 
-        "Привет, чтобы отправить объявление нажми ниже 👇", 
+        "Привет! Чтобы отправить объявление, нажмите на кнопку ниже 👇", 
         reply_markup=get_start_kb()
     )
 
@@ -80,7 +88,7 @@ def ask_photo(message):
     if limited:
         bot.send_message(
             chat_id, 
-            f"Вы пока не можете отправить объявление. ⛔️\n\nНужно, чтобы в канале вышло еще **{remaining}** объявления от других пользователей.",
+            f"Вы пока не можете отправить объявление. ⛔️\n\nНужно, чтобы в канале появилось еще **{remaining}** сообщения (объявления или просто посты).",
             parse_mode="Markdown"
         )
         return
@@ -116,7 +124,7 @@ def finish_photos_step(message):
         bot.send_message(chat_id, "Вы не отправили ни одного фото!")
         return
     
-    bot.send_message(chat_id, "Теперь отправьте текст к вашему фото", reply_markup=types.ReplyKeyboardRemove())
+    bot.send_message(chat_id, "Теперь отправьте текст к вашему объявлению", reply_markup=types.ReplyKeyboardRemove())
     bot.register_next_step_handler(message, get_text)
 
 def get_text(message):
@@ -129,7 +137,7 @@ def get_text(message):
     user_data[chat_id]['text'] = message.text
     bot.send_message(
         chat_id, 
-        "Объявление готово к публикации, вы уверены? Если нужно что-то изменить нажмите ниже", 
+        "Объявление готово к публикации, вы уверены? Если нужно что-то изменить, нажмите кнопку ниже", 
         reply_markup=get_confirm_kb()
     )
 
@@ -144,16 +152,14 @@ def confirm_step(message):
         ask_photo(message)
         return
 
-    # Процесс публикации
+    # Публикация
     temp_msg = bot.send_message(chat_id, "Объявление публикуется", reply_markup=get_start_kb())
     
     try:
-        global global_post_count
         data = user_data[chat_id]
         photos = data['photos']
         caption = data['text']
 
-        # Собираем альбом
         media = []
         for i, p_id in enumerate(photos):
             if i == 0:
@@ -161,17 +167,15 @@ def confirm_step(message):
             else:
                 media.append(types.InputMediaPhoto(p_id))
 
-        # Отправка в канал
+        # Отправляем альбом
         bot.send_media_group(CHANNEL_ID, media)
 
-        # ПОСЛЕ УСПЕШНОЙ ОТПРАВКИ:
-        global_post_count += 1 # Увеличиваем общий счетчик
-        # Ставим лимит пользователю: он сможет писать снова, когда счетчик вырастет на 4
-        # (это обеспечит пропуск в 3 объявления от других людей)
-        user_limits[chat_id] = global_post_count + 3
+        # Ставим лимит: текущий счетчик + 3 сообщения сверху
+        # (Счетчик сам увеличится, когда бот 'увидит' свой же пост в канале через channel_post_handler)
+        user_limits[chat_id] = global_msg_count + 4 
 
         bot.delete_message(chat_id, temp_msg.message_id)
-        bot.send_message(chat_id, "Объявление опубликовано! ✅\n\nСледующее вы сможете отправить после того, как в канале выйдет еще 3 объявления.")
+        bot.send_message(chat_id, "Объявление опубликовано! ✅\n\nВы сможете отправить следующее через 3 сообщения в канале.")
         user_data[chat_id] = {'photos': [], 'text': None}
 
     except Exception as e:
@@ -184,4 +188,5 @@ def confirm_step(message):
 
 if __name__ == '__main__':
     threading.Thread(target=run_flask, daemon=True).start()
+    print("Бот запущен и мониторит канал...")
     bot.infinity_polling()
