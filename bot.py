@@ -117,6 +117,9 @@ def check_blocked(user_id):
     return user_id in warnings_db and warnings_db[user_id] == 3
 
 def check_active_user(message):
+    if message is None:
+        logger.error("Message object is None!")
+        return False
     if check_blocked(message.from_user.id):
         bot.send_message(message.chat.id, "К сожалению, вы заблокированы.")
         return False
@@ -170,7 +173,7 @@ def handle_photos(message):
         user_data[chat_id]['photos'].append(file_id)
         bot.send_message(
             chat_id,
-            f"Фото получено ({len(user_data[chat_id]['photos'])}/10). Можете отправить еще или закончить:",
+            f"Фото получено ({len(user_data[chat_id]['photos'])}/10). Можете отправить еще или завершить:",
             reply_markup=get_finish_photos_kb()
         )
 
