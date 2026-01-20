@@ -1,10 +1,11 @@
 import os
 import telebot
 from telebot import types
-from flask import Flask
+from flask import Flask, request
 import threading
 from dotenv import load_dotenv
 import logging
+from apscheduler.schedulers.background import BackgroundScheduler
 
 # Настраиваем логгер
 logger = telebot.logger
@@ -31,14 +32,35 @@ user_limits = {}
 warnings_db = {}
 global_msg_count = 0
 
-# --- СЕРВЕР ДЛЯ ПОРТА RENDER ---
-@app.route('/')
-def health():
-    return "Bot is alive", 200
+# Конфигурация вебхука
+WEBHOOK_HOST = 'your-render-domain.com'  # Домен, где расположен ваш сайт
+WEBHOOK_PORT = 443  # Порт для SSL/TLS соединений
+WEBHOOK_LISTEN = '0.0.0.0'  # IP адрес, на котором слушает Flask
+WEBHOOK_SSL_CERT = './cert.pem'  # Сертификат
+WEBHOOK_SSL_PRIV = './private.key'  # Приватный ключ
 
-def run_flask():
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host='0.0.0.0', port=port)
+WEBHOOK_URL_BASE = f"https://{WEBHOOK_HOST}:{WEBHOOK_PORT}"
+WEBHOOK_URL_PATH = f"/{TOKEN}/"
+
+# Flask конфиг
+app.config['SECRET_KEY'] = 'mysecretkey'
+
+# Удаляем old webhook
+bot.remove_webhook()
+
+# Устанавливаем новый webhook
+bot.set_webhook(url=WEBHOOK_URL_BASE + WEBHOOK_URL_PATH, certificate=open(WEBHOOK_SSL_CERT, 'rb'))
+
+# Маршрут для приема обновлений
+@app.route('/' + TOKEN, methods=['POST'])
+def webhook():
+    if request.headers.get('content-type') == 'application/json':
+        json_string = request.get_data(as_text=True)
+        update = telebot.types.Update.de_json(json_string)
+        bot.process_new_update(update)
+        return ''
+    else:
+        abort(403)
 
 # --- КЛАВИАТУРЫ ---
 def get_start_kb():
@@ -255,8 +277,19 @@ def employee_action_handler(call):
     elif action == "warn":
         request_reason("Выдать предупреждение", user_id)
 
+# Регулярно очищаем временные данные
+def clean_up_temporary_data():
+    """Очистка временных данных"""
+    for key in list(user_data.keys()):
+        if len(user_data[key]['photos']) == 0 and user_data[key]['text'] is None:
+            del user_data[key]
+
+clean_up_interval = 60 * 10  # Каждые 10 минут
+scheduler = BackgroundScheduler()
+scheduler.add_job(clean_up_temporary_data, 'interval', seconds=clean_up_interval)
+scheduler.start()
+
 if __name__ == '__main__':
     logger.info("Starting the bot...")
-    threading.Thread(target=run_flask, daemon=True).start()
-    bot.infinity_polling()
+    app.run(host=WEBHOOK_LISTEN, port=WEBHOOK_PORT, ssl_context=(WEBHOOK_SSL_CERT, WEBHOOK_SSL_PRIV))
     logger.info("Bot stopped.")
