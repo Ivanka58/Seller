@@ -222,11 +222,6 @@ def confirm_step(message):
         bot.send_message(chat_id, "Объявление опубликовано!\n\nВы сможете отправить следующее через 3 сообщения в канале.")
         add_notification_to_group(data, chat_id)  # Дублируем объявление в группу сотрудников
     except Exception as e:
-        bot.send_message(chat_id, "Ошибка при публикации объявления, попробуйте позже.")
-        print(f"Error: {e}")
-try:
-    add_notification_to_group(data, chat_id)
-except Exception as e:
     print(f"Ошибка отправки уведомления в группу: {e}")
     
 if __name__ == '__main__':
