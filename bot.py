@@ -224,7 +224,11 @@ def confirm_step(message):
     except Exception as e:
         bot.send_message(chat_id, "Ошибка при публикации объявления, попробуйте позже.")
         print(f"Error: {e}")
-
+try:
+    add_notification_to_group(data, chat_id)
+except Exception as e:
+    print(f"Ошибка отправки уведомления в группу: {e}")
+    
 if __name__ == '__main__':
     threading.Thread(target=run_flask, daemon=True).start()
     print("Бот запущен и мониторит канал...")
