@@ -15,10 +15,10 @@ bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
 # --- ХРАНИЛИЩЕ ДАННЫХ ---
-user_data = {}          # Данные объявления
-user_limits = {}        # Ограничения пользователей
-warnings_db = {}        # Количество предупреждений для пользователей
-global_msg_count = 0    # Общий счетчик всех сообщений в канале
+user_data = {}           # Данные объявления
+user_limits = {}         # Ограничения пользователей
+warnings_db = {}         # Количество предупреждений для пользователей
+global_msg_count = 0     # Общий счетчик всех сообщений в канале
 
 # --- СЕРВЕР ДЛЯ ПОРТА RENDER ---
 @app.route('/')
@@ -69,18 +69,41 @@ def is_user_limited(user_id):
         return True, remaining
     return False, 0
 
-# --- ОБРАБОТКА ПОДПИСОК НА БЛОКПОСТЫ И ПРЕДУПРЕЖДЕНИЯ ---
+# --- ПРОДАЖА ПРИЧИНЫ ---
 
-# Эта функция вызывает блокировку пользователя
+# Этап запроса причины от сотрудника
+def request_reason(action, user_id):
+    keyboard = types.InlineKeyboardMarkup()
+    keyboard.add(types.InlineKeyboardButton("Отменить", callback_data=f"cancel_{action}_{user_id}"))
+    bot.send_message(GROUP_ID, f"Укажите причину {action}:", reply_markup=keyboard)
+
+# Подтверждение отмены действия
+@bot.callback_query_handler(func=lambda call: call.data.startswith("cancel"))
+def cancel_action(call):
+    action, user_id = call.data.split("_")[1:]
+    bot.edit_message_text("Действие отменено.", call.message.chat.id, call.message.message_id)
+
+# Получение причины от сотрудника
+@bot.message_handler(func=lambda m: hasattr(m, 'reply_to_message'))
+def receive_reason(message):
+    parent_call = message.reply_to_message
+    action_type = parent_call.text.split(":")[0].strip()
+    user_id = int(parent_call.text.split()[-1])
+    
+    if action_type == "Заблокировать":
+        block_user(user_id, message.text)
+    elif action_type == "Выдать предупреждение":
+        warn_user(user_id, message.text)
+
+# --- ОСНОВНЫЕ ОПЕРАЦИИ ---
+
+# Эта функция блокирует пользователя окончательно
 def block_user(user_id, reason):
-    # Убираем предупреждения
-    warnings_db.pop(user_id, None)
-    # Сообщаем пользователю о блокировке
-    bot.send_message(user_id, f"К сожалению, вы заблокированы по причине: {reason}.\nБольше не сможете пользоваться ботом.")
-    # Информируем сотрудников
+    warnings_db.pop(user_id, None)  # Удаляем предупреждения
+    bot.send_message(user_id, f"К сожалению, вы заблокированы по причине: {reason}. Больше не сможете пользоваться ботом.")
     bot.send_message(GROUP_ID, f"Пользователь {user_id} заблокирован по причине: {reason}.")
 
-# Эта функция выдает предупреждение пользователю
+# Эта функция фиксирует предупреждение
 def warn_user(user_id, reason):
     current_warnings = warnings_db.get(user_id, 0)
     next_warnings = current_warnings + 1
@@ -89,11 +112,9 @@ def warn_user(user_id, reason):
     level = f"{next_warnings}/{max_warnings}"
     
     if next_warnings == max_warnings:
-        # Последний уровень предупреждений ведет к блокировке
         block_user(user_id, reason)
     else:
-        # Обычное предупреждение
-        bot.send_message(user_id, f"Вам выдано предупреждение {level} по причине: {reason}.\nНе нарушайте правила.")
+        bot.send_message(user_id, f"Вам выдано предупреждение {level} по причине: {reason}. Не нарушайте правила.")
         bot.send_message(GROUP_ID, f"Пользователь {user_id} получил предупреждение {level} по причине: {reason}.")
 
 # Проверка блокировки пользователя
@@ -106,46 +127,6 @@ def check_active_user(message):
         bot.send_message(message.chat.id, "К сожалению, вы заблокированы.")
         return False
     return True
-
-# Вспомогательная функция ожидания ввода причины
-def wait_for_reason(chat_id):
-    msg = bot.send_message(chat_id, "Укажите причину:", reply_markup=types.ForceReply())
-    return bot.register_next_step_handler(msg, lambda m: m.text)
-
-# Обработчик сообщений с причиной блокировки или предупреждения
-@bot.message_handler(func=lambda m: hasattr(m, 'reply_to_message'))
-def handle_reason(message):
-    parent_call = message.reply_to_message
-    action_type = parent_call.json["text"][:6].strip()  # Берем первую часть текста родительского сообщения
-    user_id = int(parent_call.json["text"].split()[1])  # Извлекаем идентификатор пользователя
-    
-    if action_type == "Заблокир":
-        block_user(user_id, message.text)
-    elif action_type == "Выдать пред":
-        warn_user(user_id, message.text)
-
-# Обработчик выбора действий сотрудником
-@bot.callback_query_handler(func=lambda call: True)
-def employee_action_handler(call):
-    action, user_id = call.data.split("_")
-    user_id = int(user_id)
-    # Формируем сообщение с ожиданием причины
-    text = ""
-    if action == "block":
-        text = f"Заблокировать пользователя {user_id}? Укажите причину:"
-    elif action == "warn":
-        text = f"Выдать предупреждение пользователю {user_id}? Укажите причину:"
-    
-    # Показываем кнопку отмены
-    cancel_button = types.InlineKeyboardMarkup()
-    cancel_button.add(types.InlineKeyboardButton("Отменить", callback_data=f"cancel_{action}_{user_id}"))
-    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=cancel_button)
-
-# Обработчик отмены операции
-@bot.callback_query_handler(func=lambda call: call.data.startswith("cancel"))
-def cancel_action(call):
-    _, action, user_id = call.data.split("_")
-    bot.edit_message_text("Операция отменена.", call.message.chat.id, call.message.message_id)
 
 # --- КОМАНДЫ ---
 
@@ -287,6 +268,16 @@ def confirm_step(message):
         else:
             bot.send_message(chat_id, "Критическая ошибка, обратитесь к администратору @Ivanka58")
         print(f"Error: {e}")
+
+# Обработчик обратных вызовов (действий сотрудников)
+@bot.callback_query_handler(func=lambda call: True)
+def employee_action_handler(call):
+    action, user_id = call.data.split("_")
+    user_id = int(user_id)
+    if action == "block":
+        request_reason("Заблокировать", user_id)
+    elif action == "warn":
+        request_reason("Выдать предупреждение", user_id)
 
 if __name__ == '__main__':
     threading.Thread(target=run_flask, daemon=True).start()
