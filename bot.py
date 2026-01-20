@@ -8,15 +8,17 @@ from dotenv import load_dotenv
 load_dotenv()
 
 TOKEN = os.getenv("TG_TOKEN")
-CHANNEL_ID = os.getenv("CHANNEL_ID") # Убедись, что это ID канала (начинается с -100)
+CHANNEL_ID = os.getenv("CHANNEL_ID")  # Убедись, что это ID канала (начинается с -100)
+GROUP_ID = os.getenv("GROUP_ID")       # Идентификатор группы сотрудников (добавлена новая переменная)
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
 # --- ХРАНИЛИЩЕ ДАННЫХ ---
-user_data = {}  
-user_limits = {} 
-global_msg_count = 0 # Общий счетчик всех сообщений в канале
+user_data = {}          # Данные объявления
+user_limits = {}        # Ограничения пользователей
+warnings_db = {}        # Количество предупреждений для пользователей
+global_msg_count = 0    # Общий счетчик всех сообщений в канале
 
 # --- СЕРВЕР ДЛЯ ПОРТА RENDER ---
 @app.route('/')
@@ -67,10 +69,90 @@ def is_user_limited(user_id):
         return True, remaining
     return False, 0
 
+# --- ОБРАБОТКА ПОДПИСОК НА БЛОКПОСТЫ И ПРЕДУПРЕЖДЕНИЯ ---
+
+# Эта функция вызывает блокировку пользователя
+def block_user(user_id, reason):
+    # Убираем предупреждения
+    warnings_db.pop(user_id, None)
+    # Сообщаем пользователю о блокировке
+    bot.send_message(user_id, f"К сожалению, вы заблокированы по причине: {reason}.\nБольше не сможете пользоваться ботом.")
+    # Информируем сотрудников
+    bot.send_message(GROUP_ID, f"Пользователь {user_id} заблокирован по причине: {reason}.")
+
+# Эта функция выдает предупреждение пользователю
+def warn_user(user_id, reason):
+    current_warnings = warnings_db.get(user_id, 0)
+    next_warnings = current_warnings + 1
+    warnings_db[user_id] = next_warnings
+    max_warnings = 3
+    level = f"{next_warnings}/{max_warnings}"
+    
+    if next_warnings == max_warnings:
+        # Последний уровень предупреждений ведет к блокировке
+        block_user(user_id, reason)
+    else:
+        # Обычное предупреждение
+        bot.send_message(user_id, f"Вам выдано предупреждение {level} по причине: {reason}.\nНе нарушайте правила.")
+        bot.send_message(GROUP_ID, f"Пользователь {user_id} получил предупреждение {level} по причине: {reason}.")
+
+# Проверка блокировки пользователя
+def check_blocked(user_id):
+    return user_id in warnings_db and warnings_db[user_id] == 3
+
+# Основная проверка активности пользователя (используется в каждом обработчике)
+def check_active_user(message):
+    if check_blocked(message.from_user.id):
+        bot.send_message(message.chat.id, "К сожалению, вы заблокированы.")
+        return False
+    return True
+
+# Вспомогательная функция ожидания ввода причины
+def wait_for_reason(chat_id):
+    msg = bot.send_message(chat_id, "Укажите причину:", reply_markup=types.ForceReply())
+    return bot.register_next_step_handler(msg, lambda m: m.text)
+
+# Обработчик сообщений с причиной блокировки или предупреждения
+@bot.message_handler(func=lambda m: hasattr(m, 'reply_to_message'))
+def handle_reason(message):
+    parent_call = message.reply_to_message
+    action_type = parent_call.json["text"][:6].strip()  # Берем первую часть текста родительского сообщения
+    user_id = int(parent_call.json["text"].split()[1])  # Извлекаем идентификатор пользователя
+    
+    if action_type == "Заблокир":
+        block_user(user_id, message.text)
+    elif action_type == "Выдать пред":
+        warn_user(user_id, message.text)
+
+# Обработчик выбора действий сотрудником
+@bot.callback_query_handler(func=lambda call: True)
+def employee_action_handler(call):
+    action, user_id = call.data.split("_")
+    user_id = int(user_id)
+    # Формируем сообщение с ожиданием причины
+    text = ""
+    if action == "block":
+        text = f"Заблокировать пользователя {user_id}? Укажите причину:"
+    elif action == "warn":
+        text = f"Выдать предупреждение пользователю {user_id}? Укажите причину:"
+    
+    # Показываем кнопку отмены
+    cancel_button = types.InlineKeyboardMarkup()
+    cancel_button.add(types.InlineKeyboardButton("Отменить", callback_data=f"cancel_{action}_{user_id}"))
+    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=cancel_button)
+
+# Обработчик отмены операции
+@bot.callback_query_handler(func=lambda call: call.data.startswith("cancel"))
+def cancel_action(call):
+    _, action, user_id = call.data.split("_")
+    bot.edit_message_text("Операция отменена.", call.message.chat.id, call.message.message_id)
+
 # --- КОМАНДЫ ---
 
 @bot.message_handler(commands=['start', 'auto'])
 def send_welcome(message):
+    if not check_active_user(message):
+        return
     chat_id = message.chat.id
     user_data[chat_id] = {'photos': [], 'text': None}
     bot.send_message(
@@ -81,6 +163,8 @@ def send_welcome(message):
 
 @bot.message_handler(func=lambda m: m.text == "Отправить объявление")
 def ask_photo(message):
+    if not check_active_user(message):
+        return
     chat_id = message.chat.id
     
     # ПРОВЕРКА ЛИМИТА
@@ -103,6 +187,8 @@ def ask_photo(message):
 # Прием фотографий
 @bot.message_handler(content_types=['photo'])
 def handle_photos(message):
+    if not check_active_user(message):
+        return
     chat_id = message.chat.id
     if chat_id not in user_data: return
 
@@ -119,6 +205,8 @@ def handle_photos(message):
 # Нажатие на кнопку "Закончить отправку фото ✅"
 @bot.message_handler(func=lambda m: m.text == "Закончить отправку фото ✅")
 def finish_photos_step(message):
+    if not check_active_user(message):
+        return
     chat_id = message.chat.id
     if chat_id not in user_data or not user_data[chat_id]['photos']:
         bot.send_message(chat_id, "Вы не отправили ни одного фото!")
@@ -128,6 +216,8 @@ def finish_photos_step(message):
     bot.register_next_step_handler(message, get_text)
 
 def get_text(message):
+    if not check_active_user(message):
+        return
     chat_id = message.chat.id
     if not message.text:
         bot.send_message(chat_id, "Пожалуйста, отправьте именно текст.")
@@ -144,6 +234,8 @@ def get_text(message):
 # Кнопки Готово / Изменить
 @bot.message_handler(func=lambda m: m.text in ["Готово ☑️", "Изменить"])
 def confirm_step(message):
+    if not check_active_user(message):
+        return
     chat_id = message.chat.id
     if chat_id not in user_data: return
 
@@ -171,12 +263,22 @@ def confirm_step(message):
         bot.send_media_group(CHANNEL_ID, media)
 
         # Ставим лимит: текущий счетчик + 3 сообщения сверху
-        # (Счетчик сам увеличится, когда бот 'увидит' свой же пост в канале через channel_post_handler)
+        # (Счетчик сам увеличится, когда бот увидит свой же пост в канале через channel_post_handler)
         user_limits[chat_id] = global_msg_count + 4 
 
         bot.delete_message(chat_id, temp_msg.message_id)
         bot.send_message(chat_id, "Объявление опубликовано! ✅\n\nВы сможете отправить следующее через 3 сообщения в канале.")
-        user_data[chat_id] = {'photos': [], 'text': None}
+
+        # ИНФОРМАЦИЯ ДЛЯ СОТРУДНИКОВ
+        # Отправляем уведомление в группу сотрудников
+        user_username = message.from_user.username if message.from_user.username else str(message.from_user.id)
+        notify_text = f"📌 Пользователь {user_username} отправил объявление:\n\n{data['text']}\n\n<i>Действия:</i>"
+        keyboard = types.InlineKeyboardMarkup()
+        keyboard.add(
+            types.InlineKeyboardButton("Заблокировать", callback_data=f"block_{message.from_user.id}"),
+            types.InlineKeyboardButton("Выдать предупреждение", callback_data=f"warn_{message.from_user.id}")
+        )
+        bot.send_message(GROUP_ID, notify_text, parse_mode="html", reply_markup=keyboard)
 
     except Exception as e:
         error_str = str(e).lower()
