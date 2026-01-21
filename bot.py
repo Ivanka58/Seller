@@ -55,12 +55,17 @@ def send_notification_to_group(data, chat_id):
             media.append(types.InputMediaPhoto(p_id, caption=notify_text))
         else:
             media.append(types.InputMediaPhoto(p_id))
+    
+    # Сначала отправляем мультимедийную группу
+    bot.send_media_group(GROUP_ID, media)
+    
+    # Отдельно добавляем клавиатуру в отдельное сообщение
     keyboard = types.InlineKeyboardMarkup(row_width=2)
     keyboard.add(
         types.InlineKeyboardButton("Заблокировать", callback_data=f"block_{chat_id}"),
         types.InlineKeyboardButton("Выдать предупреждение", callback_data=f"warn_{chat_id}")
     )
-    bot.send_media_group(GROUP_ID, media, reply_markup=keyboard)
+    bot.send_message(GROUP_ID, "Управление объявлением:", reply_markup=keyboard)
 
 # --- МОНИТОРИНГ КАНАЛА ---
 @bot.channel_post_handler()
