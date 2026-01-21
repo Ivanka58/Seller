@@ -51,7 +51,10 @@ def send_notification_to_group(data, chat_id):
     notify_text = f"Пользователь @{username} отправил объявление."
     media = []
     for i, p_id in enumerate(data['photos']):
-        media.append(types.InputMediaPhoto(p_id))
+        if i == 0:
+            media.append(types.InputMediaPhoto(p_id, caption=notify_text))  # Возвращаем подпись к первому фото
+        else:
+            media.append(types.InputMediaPhoto(p_id))
     
     # Первым сообщением отправляем фотографии
     bot.send_media_group(GROUP_ID, media)
