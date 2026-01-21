@@ -48,18 +48,18 @@ def get_confirm_kb():
 # Функция отправки уведомления в группу сотрудников
 def send_notification_to_group(data, chat_id):
     username = bot.get_chat(chat_id).username
-    notify_text = f"Пользователь @{username} отправил объявление:"
+    notify_text = f"Пользователь @{username} отправил объявление."
     media = []
     for i, p_id in enumerate(data['photos']):
-        if i == 0:
-            media.append(types.InputMediaPhoto(p_id, caption=notify_text))
-        else:
-            media.append(types.InputMediaPhoto(p_id))
+        media.append(types.InputMediaPhoto(p_id))
     
-    # Сначала отправляем мультимедийную группу
+    # Первым сообщением отправляем фотографии
     bot.send_media_group(GROUP_ID, media)
     
-    # Отдельно добавляем клавиатуру в отдельное сообщение
+    # Вторым сообщением отправляем текст объявления
+    bot.send_message(GROUP_ID, data['text'])
+    
+    # Третьим сообщением отправляем инструкции с кнопками
     keyboard = types.InlineKeyboardMarkup(row_width=2)
     keyboard.add(
         types.InlineKeyboardButton("Заблокировать", callback_data=f"block_{chat_id}"),
