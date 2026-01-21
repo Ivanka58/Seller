@@ -169,7 +169,7 @@ def confirm_step(message):
         bot.send_media_group(CHANNEL_ID, media)
         user_limits[chat_id] = global_msg_count + 4
         bot.send_message(chat_id, "Объявление опубликовано!\n\nВы сможете отправить следующее через 3 сообщения в канале.")
-        send_notification_to_group(data, chat_id)  # Отправляем копию объявления в группу сотрудников
+        send_notification_to_group(data, chat_id)  # Отправляем копию объявления в группу сотрудников ПОСЛЕ публикации
     except Exception as e:
         bot.send_message(chat_id, "Ошибка при публикации объявления, попробуйте позже.")
         print(f"Error: {e}")
