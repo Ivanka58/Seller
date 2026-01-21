@@ -78,21 +78,31 @@ def button_actions(call):
     action = call.data.split('_')[0]
     if action == "block":
         # Запрашиваем причину блокировки
-        bot.send_message(GROUP_ID, f"Напишите причину блокировки пользователя @{bot.get_chat(chat_id).username}", reply_markup=types.ForceReply())
+        keyboard_cancel = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True)
+        keyboard_cancel.add(types.KeyboardButton("Отмена"))
+        bot.send_message(GROUP_ID, f"Напишите причину блокировки пользователя @{bot.get_chat(chat_id).username}", reply_markup=keyboard_cancel)
         bot.register_next_step_handler_by_chat_id(GROUP_ID, lambda msg: process_block(msg, chat_id))
     elif action == "warn":
         # Запрашиваем причину предупреждения
-        bot.send_message(GROUP_ID, f"Напишите причину предупреждения для пользователя @{bot.get_chat(chat_id).username}", reply_markup=types.ForceReply())
+        keyboard_cancel = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True)
+        keyboard_cancel.add(types.KeyboardButton("Отмена"))
+        bot.send_message(GROUP_ID, f"Напишите причину предупреждения для пользователя @{bot.get_chat(chat_id).username}", reply_markup=keyboard_cancel)
         bot.register_next_step_handler_by_chat_id(GROUP_ID, lambda msg: process_warn(msg, chat_id))
 
 # Обработка блокировки пользователя
 def process_block(message, chat_id):
+    if message.text.lower() == "отмена":
+        bot.send_message(GROUP_ID, "Действие отменено.")
+        return
     cause = message.text.strip()
     bot.send_message(GROUP_ID, f"Пользователь @{bot.get_chat(chat_id).username} заблокирован по причине: {cause}")
     bot.send_message(int(chat_id), f"Вы заблокированы администрацией по причине: {cause}")
 
 # Обработка предупреждения пользователя
 def process_warn(message, chat_id):
+    if message.text.lower() == "отмена":
+        bot.send_message(GROUP_ID, "Действие отменено.")
+        return
     cause = message.text.strip()
     current_warnings = warnings_db.get(chat_id, 0)
     new_warnings = current_warnings + 1
