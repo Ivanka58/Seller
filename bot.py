@@ -78,21 +78,28 @@ def button_actions(call):
     action = call.data.split('_')[0]
     if action == "block":
         # Запрашиваем причину блокировки
-        keyboard_cancel = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True)
-        keyboard_cancel.add(types.KeyboardButton("Отмена"))
+        keyboard_cancel = types.InlineKeyboardMarkup()
+        keyboard_cancel.add(types.InlineKeyboardButton("Отмена", callback_data=f"cancel_{chat_id}_block"))
         bot.send_message(GROUP_ID, f"Напишите причину блокировки пользователя @{bot.get_chat(chat_id).username}", reply_markup=keyboard_cancel)
         bot.register_next_step_handler_by_chat_id(GROUP_ID, lambda msg: process_block(msg, chat_id))
     elif action == "warn":
         # Запрашиваем причину предупреждения
-        keyboard_cancel = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True)
-        keyboard_cancel.add(types.KeyboardButton("Отмена"))
+        keyboard_cancel = types.InlineKeyboardMarkup()
+        keyboard_cancel.add(types.InlineKeyboardButton("Отмена", callback_data=f"cancel_{chat_id}_warn"))
         bot.send_message(GROUP_ID, f"Напишите причину предупреждения для пользователя @{bot.get_chat(chat_id).username}", reply_markup=keyboard_cancel)
         bot.register_next_step_handler_by_chat_id(GROUP_ID, lambda msg: process_warn(msg, chat_id))
+    elif action.startswith("cancel"):
+        parts = action.split('_')
+        _, chat_id, operation = parts
+        if operation == "block":
+            bot.send_message(GROUP_ID, "Блокировка отменена.")
+        elif operation == "warn":
+            bot.send_message(GROUP_ID, "Предупреждение отменено.")
 
 # Обработка блокировки пользователя
 def process_block(message, chat_id):
-    if message.text.lower() == "отмена":
-        bot.send_message(GROUP_ID, "Действие отменено.")
+    if message.content_type != 'text':
+        bot.send_message(GROUP_ID, "Необходимо ввести текстовую причину.")
         return
     cause = message.text.strip()
     bot.send_message(GROUP_ID, f"Пользователь @{bot.get_chat(chat_id).username} заблокирован по причине: {cause}")
@@ -100,8 +107,8 @@ def process_block(message, chat_id):
 
 # Обработка предупреждения пользователя
 def process_warn(message, chat_id):
-    if message.text.lower() == "отмена":
-        bot.send_message(GROUP_ID, "Действие отменено.")
+    if message.content_type != 'text':
+        bot.send_message(GROUP_ID, "Необходимо ввести текстовую причину.")
         return
     cause = message.text.strip()
     current_warnings = warnings_db.get(chat_id, 0)
