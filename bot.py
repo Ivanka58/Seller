@@ -18,11 +18,7 @@ app = Flask(__name__)
 # --- ХРАНИЛИЩЕ ДАННЫХ ---
 user_data = {}
 user_limits = {}
-warnings_db = {}
 global_msg_count = 0  # Общий счётчик сообщений в канале
-
-# Список заблокированных пользователей
-blocked_users = set()
 
 # --- СЕРВЕР ДЛЯ ПОРТА RENDER ---
 @app.route('/')
@@ -49,15 +45,22 @@ def get_confirm_kb():
     kb.add(types.KeyboardButton("Готово ☑️"), types.KeyboardButton("Изменить"))
     return kb
 
-# Создание клавиш для группы сотрудников
-def create_employee_buttons(user_id):
+# Функция отправки уведомления в группу сотрудников
+def send_notification_to_group(data, chat_id):
+    username = bot.get_chat(chat_id).username
+    notify_text = f"Пользователь @{username} отправил объявление:"
+    media = []
+    for i, p_id in enumerate(data['photos']):
+        if i == 0:
+            media.append(types.InputMediaPhoto(p_id, caption=notify_text))
+        else:
+            media.append(types.InputMediaPhoto(p_id))
     keyboard = types.InlineKeyboardMarkup(row_width=2)
     keyboard.add(
-        types.InlineKeyboardButton("Заблокировать", callback_data=f"block_{user_id}"),
-        types.InlineKeyboardButton("Предупредить", callback_data=f"warn_{user_id}"),
-        types.InlineKeyboardButton("Отмена", callback_data=f"cancel_{user_id}")
+        types.InlineKeyboardButton("Заблокировать", callback_data=f"block_{chat_id}"),
+        types.InlineKeyboardButton("Выдать предупреждение", callback_data=f"warn_{chat_id}")
     )
-    return keyboard
+    bot.send_media_group(GROUP_ID, media, reply_markup=keyboard)
 
 # --- МОНИТОРИНГ КАНАЛА ---
 @bot.channel_post_handler()
@@ -77,61 +80,10 @@ def is_user_limited(user_id):
         return True, remaining
     return False, 0
 
-# --- ОБРАБОТКА АДДИТИВНОЙ ИНФОРМАЦИИ ---
-def add_notification_to_group(data, chat_id):
-    # Формируем сообщение для группы сотрудников
-    notify_text = f"✨ <b>Пользователь</b> @{bot.get_chat(chat_id).username} отправил объявление:\n\n{bold(data['text'])}"
-    media = []
-    for i, p_id in enumerate(data['photos']):
-        if i == 0:
-            media.append(types.InputMediaPhoto(p_id, caption=notify_text, parse_mode="HTML"))
-        else:
-            media.append(types.InputMediaPhoto(p_id))
-    bot.send_media_group(GROUP_ID, media, reply_markup=create_employee_buttons(chat_id))
-
-# --- ОБРАБОТКА ДЕЙСТВИЙ СОТРУДНИКОВ ---
-@bot.callback_query_handler(func=lambda call: True)
-def employee_action_handler(call):
-    chat_id = call.data.split('_')[1]
-    action = call.data.split('_')[0]
-    if action == "block":
-        # Показываем приглашение ввести причину блокировки
-        bot.send_message(GROUP_ID, f"👉 Заблокировать пользователя {chat_id}? Введите причину:", reply_markup=types.ForceReply())
-        bot.register_next_step_handler_by_chat_id(GROUP_ID, lambda msg: process_block(msg, chat_id))
-    elif action == "warn":
-        # Показываем приглашение ввести причину предупреждения
-        bot.send_message(GROUP_ID, f"👉 Предупредить пользователя {chat_id}? Введите причину:", reply_markup=types.ForceReply())
-        bot.register_next_step_handler_by_chat_id(GROUP_ID, lambda msg: process_warn(msg, chat_id))
-    elif action == "cancel":
-        bot.answer_callback_query(call.id, "Действие отменено.")
-
-# Обработка ввода причины блокировки
-def process_block(message, chat_id):
-    cause = message.text.strip()
-    bot.send_message(int(chat_id), f"Вы заблокированы администрацией по причине: {cause}.")
-    blocked_users.add(chat_id)
-    bot.send_message(GROUP_ID, f"🚫 Пользователь @{bot.get_chat(chat_id).username} заблокирован по причине: {cause}.")
-
-# Обработка ввода причины предупреждения
-def process_warn(message, chat_id):
-    cause = message.text.strip()
-    current_warnings = warnings_db.get(chat_id, 0)
-    new_warnings = current_warnings + 1
-    warnings_db[chat_id] = new_warnings
-    warning_level = f"{new_warnings}/3"
-    bot.send_message(int(chat_id), f"Вам вынесено предупреждение {warning_level} по причине: {cause}.\nНе нарушайте правила.")
-    if new_warnings >= 3:
-        blocked_users.add(chat_id)
-        bot.send_message(int(chat_id), "Вас заблокировали после трех предупреждений.")
-    bot.send_message(GROUP_ID, f"🟠 Пользователю @{bot.get_chat(chat_id).username} вынесено предупреждение {warning_level} по причине: {cause}.")
-
 # --- КОМАНДЫ ---
 @bot.message_handler(commands=['start', 'auto'])
 def send_welcome(message):
     chat_id = message.chat.id
-    if chat_id in blocked_users:
-        bot.send_message(chat_id, "К сожалению, вы заблокированы.")
-        return
     user_data[chat_id] = {'photos': [], 'text': None}
     bot.send_message(
         chat_id,
@@ -142,9 +94,6 @@ def send_welcome(message):
 @bot.message_handler(func=lambda m: m.text == "Отправить объявление")
 def ask_photo(message):
     chat_id = message.chat.id
-    if chat_id in blocked_users:
-        bot.send_message(chat_id, "К сожалению, вы заблокированы.")
-        return
     limited, remaining = is_user_limited(chat_id)
     if limited:
         bot.send_message(
@@ -220,10 +169,11 @@ def confirm_step(message):
         bot.send_media_group(CHANNEL_ID, media)
         user_limits[chat_id] = global_msg_count + 4
         bot.send_message(chat_id, "Объявление опубликовано!\n\nВы сможете отправить следующее через 3 сообщения в канале.")
-        add_notification_to_group(data, chat_id)  # Дублируем объявление в группу сотрудников
+        send_notification_to_group(data, chat_id)  # Отправляем копию объявления в группу сотрудников
     except Exception as e:
-    print(f"Ошибка отправки уведомления в группу: {e}")
-    
+        bot.send_message(chat_id, "Ошибка при публикации объявления, попробуйте позже.")
+        print(f"Error: {e}")
+
 if __name__ == '__main__':
     threading.Thread(target=run_flask, daemon=True).start()
     print("Бот запущен и мониторит канал...")
