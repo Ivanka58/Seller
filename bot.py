@@ -19,6 +19,7 @@ app = Flask(__name__)
 user_data = {}
 user_limits = {}
 global_msg_count = 0  # Общий счётчик сообщений в канале
+warnings_db = {}  # Хранение предупреждений
 
 # --- СЕРВЕР ДЛЯ ПОРТА RENDER ---
 @app.route('/')
@@ -52,7 +53,7 @@ def send_notification_to_group(data, chat_id):
     media = []
     for i, p_id in enumerate(data['photos']):
         if i == 0:
-            media.append(types.InputMediaPhoto(p_id, caption=notify_text))  # Возвращаем подпись к первому фото
+            media.append(types.InputMediaPhoto(p_id, caption=notify_text))
         else:
             media.append(types.InputMediaPhoto(p_id))
     
@@ -69,6 +70,39 @@ def send_notification_to_group(data, chat_id):
         types.InlineKeyboardButton("Выдать предупреждение", callback_data=f"warn_{chat_id}")
     )
     bot.send_message(GROUP_ID, "Управление объявлением:", reply_markup=keyboard)
+
+# --- ОБРАБОТКА КНОПОК ---
+@bot.callback_query_handler(func=lambda call: True)
+def button_actions(call):
+    chat_id = call.data.split('_')[1]
+    action = call.data.split('_')[0]
+    if action == "block":
+        # Запрашиваем причину блокировки
+        bot.send_message(GROUP_ID, f"Напишите причину блокировки пользователя @{bot.get_chat(chat_id).username}", reply_markup=types.ForceReply())
+        bot.register_next_step_handler_by_chat_id(GROUP_ID, lambda msg: process_block(msg, chat_id))
+    elif action == "warn":
+        # Запрашиваем причину предупреждения
+        bot.send_message(GROUP_ID, f"Напишите причину предупреждения для пользователя @{bot.get_chat(chat_id).username}", reply_markup=types.ForceReply())
+        bot.register_next_step_handler_by_chat_id(GROUP_ID, lambda msg: process_warn(msg, chat_id))
+
+# Обработка блокировки пользователя
+def process_block(message, chat_id):
+    cause = message.text.strip()
+    bot.send_message(GROUP_ID, f"Пользователь @{bot.get_chat(chat_id).username} заблокирован по причине: {cause}")
+    bot.send_message(int(chat_id), f"Вы заблокированы администрацией по причине: {cause}")
+
+# Обработка предупреждения пользователя
+def process_warn(message, chat_id):
+    cause = message.text.strip()
+    current_warnings = warnings_db.get(chat_id, 0)
+    new_warnings = current_warnings + 1
+    warnings_db[chat_id] = new_warnings
+    warning_level = f"{new_warnings}/3"
+    bot.send_message(GROUP_ID, f"Пользователю @{bot.get_chat(chat_id).username} выдано предупреждение {warning_level} по причине: {cause}")
+    bot.send_message(int(chat_id), f"Вам выдано предупреждение {warning_level} по причине: {cause}. Не нарушайте правила.")
+    if new_warnings >= 3:
+        bot.send_message(GROUP_ID, f"Пользователь @{bot.get_chat(chat_id).username} получил последнее предупреждение и заблокирован.")
+        bot.send_message(int(chat_id), f"Вы получили предупреждение 3/3 по причине: {cause}. Вы заблокированы.")
 
 # --- МОНИТОРИНГ КАНАЛА ---
 @bot.channel_post_handler()
