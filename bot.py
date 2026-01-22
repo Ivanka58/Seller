@@ -1,3 +1,4 @@
+import os  # Импорт модуля os
 import telebot
 from telebot import types
 from flask import Flask
