@@ -1,4 +1,4 @@
-import os  # Импорт модуля os
+import os
 import telebot
 from telebot import types
 from flask import Flask
@@ -95,7 +95,7 @@ def button_actions(call):
             bot.send_message(GROUP_ID, "Предупреждение отменено.")
 
 # Обработка блокировки пользователя
-@bot.message_handler(func=lambda m: hasattr(m, 'reply_to_message') and m.reply_to_message.text.startswith("Напишите причину"))
+@bot.message_handler(func=lambda m: hasattr(m, 'reply_to_message') and m.reply_to_message and m.reply_to_message.text.startswith("Напишите причину"))
 def process_block_or_warn(message):
     chat_id = message.reply_to_message.text.split('@')[1].split()[0][1:]  # Извлекаем chat_id из сообщения
     if message.text.lower() == "отмена":
