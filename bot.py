@@ -1,4 +1,3 @@
-import os
 import telebot
 from telebot import types
 from flask import Flask
@@ -81,13 +80,11 @@ def button_actions(call):
         keyboard_cancel = types.InlineKeyboardMarkup()
         keyboard_cancel.add(types.InlineKeyboardButton("Отмена", callback_data=f"cancel_{chat_id}_block"))
         bot.send_message(GROUP_ID, f"Напишите причину блокировки пользователя @{bot.get_chat(chat_id).username}", reply_markup=keyboard_cancel)
-        bot.register_next_step_handler_by_chat_id(GROUP_ID, lambda msg: process_block(msg, chat_id))
     elif action == "warn":
         # Запрашиваем причину предупреждения
         keyboard_cancel = types.InlineKeyboardMarkup()
         keyboard_cancel.add(types.InlineKeyboardButton("Отмена", callback_data=f"cancel_{chat_id}_warn"))
         bot.send_message(GROUP_ID, f"Напишите причину предупреждения для пользователя @{bot.get_chat(chat_id).username}", reply_markup=keyboard_cancel)
-        bot.register_next_step_handler_by_chat_id(GROUP_ID, lambda msg: process_warn(msg, chat_id))
     elif action.startswith("cancel"):
         parts = action.split('_')
         _, chat_id, operation = parts
@@ -97,29 +94,26 @@ def button_actions(call):
             bot.send_message(GROUP_ID, "Предупреждение отменено.")
 
 # Обработка блокировки пользователя
-def process_block(message, chat_id):
-    if message.content_type != 'text':
-        bot.send_message(GROUP_ID, "Необходимо ввести текстовую причину.")
+@bot.message_handler(func=lambda m: hasattr(m, 'reply_to_message') and m.reply_to_message.text.startswith("Напишите причину"))
+def process_block_or_warn(message):
+    chat_id = message.reply_to_message.text.split('@')[1].split()[0][1:]  # Извлекаем chat_id из сообщения
+    if message.text.lower() == "отмена":
+        bot.send_message(GROUP_ID, "Действие отменено.")
         return
     cause = message.text.strip()
-    bot.send_message(GROUP_ID, f"Пользователь @{bot.get_chat(chat_id).username} заблокирован по причине: {cause}")
-    bot.send_message(int(chat_id), f"Вы заблокированы администрацией по причине: {cause}")
-
-# Обработка предупреждения пользователя
-def process_warn(message, chat_id):
-    if message.content_type != 'text':
-        bot.send_message(GROUP_ID, "Необходимо ввести текстовую причину.")
-        return
-    cause = message.text.strip()
-    current_warnings = warnings_db.get(chat_id, 0)
-    new_warnings = current_warnings + 1
-    warnings_db[chat_id] = new_warnings
-    warning_level = f"{new_warnings}/3"
-    bot.send_message(GROUP_ID, f"Пользователю @{bot.get_chat(chat_id).username} выдано предупреждение {warning_level} по причине: {cause}")
-    bot.send_message(int(chat_id), f"Вам выдано предупреждение {warning_level} по причине: {cause}. Не нарушайте правила.")
-    if new_warnings >= 3:
-        bot.send_message(GROUP_ID, f"Пользователь @{bot.get_chat(chat_id).username} получил последнее предупреждение и заблокирован.")
-        bot.send_message(int(chat_id), f"Вы получили предупреждение 3/3 по причине: {cause}. Вы заблокированы.")
+    if "блокировки" in message.reply_to_message.text:
+        bot.send_message(GROUP_ID, f"Пользователь @{bot.get_chat(chat_id).username} заблокирован по причине: {cause}")
+        bot.send_message(int(chat_id), f"Вы заблокированы администрацией по причине: {cause}")
+    elif "предупреждения" in message.reply_to_message.text:
+        current_warnings = warnings_db.get(chat_id, 0)
+        new_warnings = current_warnings + 1
+        warnings_db[chat_id] = new_warnings
+        warning_level = f"{new_warnings}/3"
+        bot.send_message(GROUP_ID, f"Пользователю @{bot.get_chat(chat_id).username} выдано предупреждение {warning_level} по причине: {cause}")
+        bot.send_message(int(chat_id), f"Вам выдано предупреждение {warning_level} по причине: {cause}. Не нарушайте правила.")
+        if new_warnings >= 3:
+            bot.send_message(GROUP_ID, f"Пользователь @{bot.get_chat(chat_id).username} получил последнее предупреждение и заблокирован.")
+            bot.send_message(int(chat_id), f"Вы получили предупреждение 3/3 по причине: {cause}. Вы заблокированы.")
 
 # --- МОНИТОРИНГ КАНАЛА ---
 @bot.channel_post_handler()
