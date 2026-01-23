@@ -21,9 +21,6 @@ user_limits = {}
 global_msg_count = 0  # Общий счётчик сообщений в канале
 warnings_db = {}  # Хранение предупреждений
 
-# Вспомогательные флаги для предотвращения повторных запросов
-processing_cause = False
-
 # --- СЕРВЕР ДЛЯ ПОРТА RENDER ---
 @app.route('/')
 def health():
@@ -91,7 +88,6 @@ def send_notification_to_group(data, chat_id):
 # --- ОБРАБОТКА КНОПОК ---
 @bot.callback_query_handler(func=lambda call: True)
 def button_actions(call):
-    global processing_cause
     chat_id = call.data.split('_')[1]
     action = call.data.split('_')[0]
     if action == "block":
@@ -100,11 +96,7 @@ def button_actions(call):
     elif action == "warn":
         # Предоставляем кнопки с причинами предупреждения
         bot.send_message(GROUP_ID, f"Выберите причину предупреждения для пользователя @{bot.get_chat(chat_id).username}", reply_markup=reasons_keyboard(chat_id, "warn"))
-    elif action.startswith("block_") or action.startswith("warn_"):
-        # Обработка выбранной причины
-        if processing_cause:
-            return  # Пропускаем повторную обработку
-        processing_cause = True
+    elif action.startswith("block_") or action.startswith("warn_"):  # Обработка выбранной причины
         parts = action.split('_')
         operation, chat_id, cause = parts[:3]
         if operation == "block":
@@ -120,7 +112,6 @@ def button_actions(call):
             if new_warnings >= 3:
                 bot.send_message(GROUP_ID, f"Пользователь @{bot.get_chat(chat_id).username} получил последнее предупреждение и заблокирован.")
                 bot.send_message(int(chat_id), f"Вы получили предупреждение 3/3 по причине: {cause}. Вы заблокированы.")
-        processing_cause = False
     elif action.startswith("cancel"):
         bot.send_message(GROUP_ID, "Действие отменено.")
 
