@@ -77,49 +77,20 @@ def button_actions(call):
     chat_id = call.data.split('_')[1]
     action = call.data.split('_')[0]
     if action == "block":
-        # Запрашиваем ручную причину блокировки
-        keyboard_cancel = types.InlineKeyboardMarkup()
-        keyboard_cancel.add(types.InlineKeyboardButton("Отмена", callback_data=f"cancel_{chat_id}_block"))
-        bot.send_message(GROUP_ID, f"Напишите причину блокировки пользователя @{bot.get_chat(chat_id).username}", reply_markup=keyboard_cancel)
-        bot.register_next_step_handler_by_chat_id(GROUP_ID, lambda msg: process_block(msg, chat_id))
+        # Блокируем пользователя без дополнительных шагов
+        bot.send_message(GROUP_ID, f"Пользователь @{bot.get_chat(chat_id).username} заблокирован.")
+        bot.send_message(int(chat_id), "Вы заблокированы администрацией и больше не сможете пользоваться ботом.")
     elif action == "warn":
-        # Запрашиваем ручную причину предупреждения
-        keyboard_cancel = types.InlineKeyboardMarkup()
-        keyboard_cancel.add(types.InlineKeyboardButton("Отмена", callback_data=f"cancel_{chat_id}_warn"))
-        bot.send_message(GROUP_ID, f"Напишите причину предупреждения для пользователя @{bot.get_chat(chat_id).username}", reply_markup=keyboard_cancel)
-        bot.register_next_step_handler_by_chat_id(GROUP_ID, lambda msg: process_warn(msg, chat_id))
-    elif action.startswith("cancel"):
-        parts = action.split('_')
-        _, chat_id, operation = parts
-        if operation == "block":
-            bot.send_message(GROUP_ID, "Блокировка отменена.")
-        elif operation == "warn":
-            bot.send_message(GROUP_ID, "Предупреждение отменено.")
-
-# Обработка блокировки пользователя
-def process_block(message, chat_id):
-    if message.text.lower() == "отмена":
-        bot.send_message(GROUP_ID, "Действие отменено.")
-        return
-    cause = message.text.strip()
-    bot.send_message(GROUP_ID, f"Пользователь @{bot.get_chat(chat_id).username} заблокирован по причине: {cause}")
-    bot.send_message(int(chat_id), f"Вы заблокированы администрацией по причине: {cause}")
-
-# Обработка предупреждения пользователя
-def process_warn(message, chat_id):
-    if message.text.lower() == "отмена":
-        bot.send_message(GROUP_ID, "Действие отменено.")
-        return
-    cause = message.text.strip()
-    current_warnings = warnings_db.get(chat_id, 0)
-    new_warnings = current_warnings + 1
-    warnings_db[chat_id] = new_warnings
-    warning_level = f"{new_warnings}/3"
-    bot.send_message(GROUP_ID, f"Пользователю @{bot.get_chat(chat_id).username} выдано предупреждение {warning_level} по причине: {cause}")
-    bot.send_message(int(chat_id), f"Вам выдано предупреждение {warning_level} по причине: {cause}. Не нарушайте правила.")
-    if new_warnings >= 3:
-        bot.send_message(GROUP_ID, f"Пользователь @{bot.get_chat(chat_id).username} получил последнее предупреждение и заблокирован.")
-        bot.send_message(int(chat_id), f"Вы получили предупреждение 3/3 по причине: {cause}. Вы заблокированы.")
+        # Выдаём предупреждение без дополнительных шагов
+        current_warnings = warnings_db.get(chat_id, 0)
+        new_warnings = current_warnings + 1
+        warnings_db[chat_id] = new_warnings
+        warning_level = f"{new_warnings}/3"
+        bot.send_message(GROUP_ID, f"Пользователю @{bot.get_chat(chat_id).username} выдано предупреждение {warning_level}.")
+        bot.send_message(int(chat_id), f"Вам выдано предупреждение администрацией.")
+        if new_warnings >= 3:
+            bot.send_message(GROUP_ID, f"Пользователь @{bot.get_chat(chat_id).username} получил последнее предупреждение и заблокирован.")
+            bot.send_message(int(chat_id), f"Вы заблокированы администрацией и больше не сможете пользоваться ботом.")
 
 # --- МОНИТОРИНГ КАНАЛА ---
 @bot.channel_post_handler()
