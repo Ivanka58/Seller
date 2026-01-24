@@ -87,56 +87,28 @@ def button_actions(call):
         warnings_db[chat_id] = new_warnings
         warning_level = f"{new_warnings}/3"
         bot.send_message(GROUP_ID, f"Пользователю @{bot.get_chat(chat_id).username} выдано предупреждение {warning_level}.")
-        bot.send_message(int(chat_id), f"Вам выдано предупреждение администрацией.")
+        bot.send_message(int(chat_id), f"Вам выдано предупреждение {warning_level} администрацией.")
         if new_warnings >= 3:
             bot.send_message(GROUP_ID, f"Пользователь @{bot.get_chat(chat_id).username} получил последнее предупреждение и заблокирован.")
             bot.send_message(int(chat_id), f"Вы заблокированы администрацией и больше не сможете пользоваться ботом.")
 
-# --- МОНИТОРИНГ КАНАЛА ---
-@bot.channel_post_handler()
-def listen_channel(message):
-    global global_msg_count
-    if str(message.chat.id) == str(CHANNEL_ID):
-        global_msg_count += 1
-        print(f"Счётчик канала увеличен: {global_msg_count}")
+# --- ФУНКЦИЯ ПРОВЕРКИ БЛОИРОВКИ ---
+def is_banned(chat_id):
+    current_warnings = warnings_db.get(chat_id, 0)
+    return current_warnings >= 3
 
-# --- ФУНКЦИИ ПРОВЕРКИ ЛИМИТА ---
-def is_user_limited(user_id):
-    if user_id not in user_limits:
-        return False, 0
-    needed_count = user_limits[user_id]
-    if global_msg_count < needed_count:
-        remaining = needed_count - global_msg_count
-        return True, remaining
-    return False, 0
-
-# --- КОМАНДЫ ---
+# --- ОБРАБОТКА КОМАНД ---
 @bot.message_handler(commands=['start', 'auto'])
 def send_welcome(message):
     chat_id = message.chat.id
+    if is_banned(chat_id):
+        bot.send_message(chat_id, "К сожалению, вы заблокированы и не можете пользоваться ботом.")
+        return
     user_data[chat_id] = {'photos': [], 'text': None}
     bot.send_message(
         chat_id,
         "Привет! Чтобы отправить объявление, нажмите на кнопку ниже 👇",
         reply_markup=get_start_kb()
-    )
-
-@bot.message_handler(func=lambda m: m.text == "Отправить объявление")
-def ask_photo(message):
-    chat_id = message.chat.id
-    limited, remaining = is_user_limited(chat_id)
-    if limited:
-        bot.send_message(
-            chat_id,
-            f"Вы пока не можете отправить объявление.\n\nНужно, чтобы в канале появилось еще **{remaining}** сообщения.",
-            parse_mode="Markdown"
-        )
-        return
-    user_data[chat_id] = {'photos': [], 'text': None}
-    bot.send_message(
-        chat_id,
-        "Отправьте фотографию(ии) вашего объявления",
-        reply_markup=types.ReplyKeyboardRemove()
     )
 
 # Прием фотографий
