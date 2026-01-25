@@ -179,4 +179,4 @@ def confirm_step(message):
 if __name__ == '__main__':
     threading.Thread(target=run_flask, daemon=True).start()
     print("Бот запущен и мониторит канал...")
-    bot.infinity_polling(
+    bot.infinity_polling()
