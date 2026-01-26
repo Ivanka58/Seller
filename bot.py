@@ -101,6 +101,7 @@ def is_banned(chat_id):
 @bot.message_handler(commands=['start', 'auto'])
 def send_welcome(message):
     chat_id = message.chat.id
+    print(f"Processing '/start' or '/auto' for user {chat_id}")  # Лог для проверки
     if is_banned(chat_id):
         bot.send_message(chat_id, "К сожалению, вы заблокированы и не можете пользоваться ботом.")
         return
