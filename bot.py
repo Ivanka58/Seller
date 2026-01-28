@@ -90,6 +90,23 @@ def button_actions(call):
     elif action == "warn":
         warn_user(chat_id)
 
+# --- ФУНКЦИЯ ОТРАВКИ УВЕДОМЛЕНИЯ В ГРУППУ СОТРУДНИКОВ ---
+def send_notification_to_group(data, chat_id):
+    username = bot.get_chat(chat_id).username
+    notify_text = f"Пользователь @{username} отправил объявление."
+    media = []
+    for i, p_id in enumerate(data['photos']):
+        if i == 0:
+            media.append(types.InputMediaPhoto(p_id, caption=notify_text))
+        else:
+            media.append(types.InputMediaPhoto(p_id))
+    keyboard = types.InlineKeyboardMarkup(row_width=2)
+    keyboard.add(
+        types.InlineKeyboardButton("Заблокировать", callback_data=f"block_{chat_id}"),
+        types.InlineKeyboardButton("Выдать предупреждение", callback_data=f"warn_{chat_id}")
+    )
+    bot.send_media_group(GROUP_ID, media, reply_markup=keyboard)
+
 # --- КОМАНДЫ ---
 @bot.message_handler(commands=['start', 'auto'])
 def send_welcome(message):
@@ -179,6 +196,7 @@ def confirm_step(message):
         bot.send_media_group(CHANNEL_ID, media)
         user_limits[chat_id] = global_msg_count + 4
         bot.send_message(chat_id, "Объявление опубликовано!\n\nВы сможете отправить следующее через 3 сообщения в канале.")
+        send_notification_to_group(data, chat_id)  # Отправляем уведомление в группу сотрудников
     except Exception as e:
         bot.send_message(chat_id, "Ошибка при публикации объявления, попробуйте позже.")
         print(f"Error: {e}")
