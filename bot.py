@@ -10,7 +10,6 @@ load_dotenv()
 
 TOKEN = os.getenv("TG_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")  # ID канала
-GROUP_ID = os.getenv("GROUP_ID")      # ID группы сотрудников
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
@@ -19,7 +18,6 @@ app = Flask(__name__)
 user_data = {}
 user_limits = {}
 global_msg_count = 0  # Общий счётчик сообщений в канале
-warnings_db = {}  # Хранение предупреждений
 
 # --- СЕРВЕР ДЛЯ ПОРТА RENDER ---
 @app.route('/')
@@ -46,70 +44,51 @@ def get_confirm_kb():
     kb.add(types.KeyboardButton("Готово ☑️"), types.KeyboardButton("Изменить"))
     return kb
 
-# Функция отправки уведомления в группу сотрудников
-def send_notification_to_group(data, chat_id):
-    username = bot.get_chat(chat_id).username
-    notify_text = f"Пользователь @{username} отправил объявление."
-    media = []
-    for i, p_id in enumerate(data['photos']):
-        if i == 0:
-            media.append(types.InputMediaPhoto(p_id, caption=notify_text))
-        else:
-            media.append(types.InputMediaPhoto(p_id))
-    
-    # Первым сообщением отправляем фотографии
-    bot.send_media_group(GROUP_ID, media)
-    
-    # Вторым сообщением отправляем текст объявления
-    bot.send_message(GROUP_ID, data['text'])
-    
-    # Третьим сообщением отправляем инструкции с кнопками
-    keyboard = types.InlineKeyboardMarkup(row_width=2)
-    keyboard.add(
-        types.InlineKeyboardButton("Заблокировать", callback_data=f"block_{chat_id}"),
-        types.InlineKeyboardButton("Выдать предупреждение", callback_data=f"warn_{chat_id}")
-    )
-    bot.send_message(GROUP_ID, "Управление объявлением:", reply_markup=keyboard)
+# --- МОНИТОРИНГ КАНАЛА ---
+@bot.channel_post_handler()
+def listen_channel(message):
+    global global_msg_count
+    if str(message.chat.id) == str(CHANNEL_ID):
+        global_msg_count += 1
+        print(f"Счётчик канала увеличен: {global_msg_count}")
 
-# --- ОБРАБОТКА КНОПОК ---
-@bot.callback_query_handler(func=lambda call: True)
-def button_actions(call):
-    chat_id = call.data.split('_')[1]
-    action = call.data.split('_')[0]
-    if action == "block":
-        # Блокируем пользователя без дополнительных шагов
-        bot.send_message(GROUP_ID, f"Пользователь @{bot.get_chat(chat_id).username} заблокирован.")
-        bot.send_message(int(chat_id), "Вы заблокированы администрацией и больше не сможете пользоваться ботом.")
-    elif action == "warn":
-        # Выдаём предупреждение без дополнительных шагов
-        current_warnings = warnings_db.get(chat_id, 0)
-        new_warnings = current_warnings + 1
-        warnings_db[chat_id] = new_warnings
-        warning_level = f"{new_warnings}/3"
-        bot.send_message(GROUP_ID, f"Пользователю @{bot.get_chat(chat_id).username} выдано предупреждение {warning_level}.")
-        bot.send_message(int(chat_id), f"Вам выдано предупреждение {warning_level} администрацией.")
-        if new_warnings >= 3:
-            bot.send_message(GROUP_ID, f"Пользователь @{bot.get_chat(chat_id).username} получил последнее предупреждение и заблокирован.")
-            bot.send_message(int(chat_id), f"Вы заблокированы администрацией и больше не сможете пользоваться ботом.")
+# --- ФУНКЦИИ ПРОВЕРКИ ЛИМИТА ---
+def is_user_limited(user_id):
+    if user_id not in user_limits:
+        return False, 0
+    needed_count = user_limits[user_id]
+    if global_msg_count < needed_count:
+        remaining = needed_count - global_msg_count
+        return True, remaining
+    return False, 0
 
-# --- ФУНКЦИЯ ПРОВЕРКИ БЛОИРОВКИ ---
-def is_banned(chat_id):
-    current_warnings = warnings_db.get(chat_id, 0)
-    return current_warnings >= 3
-
-# --- ОБРАБОТКА КОМАНД ---
+# --- КОМАНДЫ ---
 @bot.message_handler(commands=['start', 'auto'])
 def send_welcome(message):
     chat_id = message.chat.id
-    print(f"Processing '/start' or '/auto' for user {chat_id}")  # Лог для проверки
-    if is_banned(chat_id):
-        bot.send_message(chat_id, "К сожалению, вы заблокированы и не можете пользоваться ботом.")
-        return
     user_data[chat_id] = {'photos': [], 'text': None}
     bot.send_message(
         chat_id,
         "Привет! Чтобы отправить объявление, нажмите на кнопку ниже 👇",
         reply_markup=get_start_kb()
+    )
+
+@bot.message_handler(func=lambda m: m.text == "Отправить объявление")
+def ask_photo(message):
+    chat_id = message.chat.id
+    limited, remaining = is_user_limited(chat_id)
+    if limited:
+        bot.send_message(
+            chat_id,
+            f"Вы пока не можете отправить объявление.\n\nНужно, чтобы в канале появилось еще **{remaining}** сообщения.",
+            parse_mode="Markdown"
+        )
+        return
+    user_data[chat_id] = {'photos': [], 'text': None}
+    bot.send_message(
+        chat_id,
+        "Отправьте фотографию(ии) вашего объявления",
+        reply_markup=types.ReplyKeyboardRemove()
     )
 
 # Прием фотографий
@@ -172,7 +151,6 @@ def confirm_step(message):
         bot.send_media_group(CHANNEL_ID, media)
         user_limits[chat_id] = global_msg_count + 4
         bot.send_message(chat_id, "Объявление опубликовано!\n\nВы сможете отправить следующее через 3 сообщения в канале.")
-        send_notification_to_group(data, chat_id)  # Отправляем копию объявления в группу сотрудников ПОСЛЕ публикации
     except Exception as e:
         bot.send_message(chat_id, "Ошибка при публикации объявления, попробуйте позже.")
         print(f"Error: {e}")
