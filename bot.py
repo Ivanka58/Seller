@@ -105,7 +105,10 @@ def send_notification_to_group(data, chat_id):
         types.InlineKeyboardButton("Заблокировать", callback_data=f"block_{chat_id}"),
         types.InlineKeyboardButton("Выдать предупреждение", callback_data=f"warn_{chat_id}")
     )
-    bot.send_media_group(GROUP_ID, media, reply_markup=keyboard)
+    try:
+        bot.send_media_group(GROUP_ID, media, reply_markup=keyboard)
+    except Exception as e:
+        print(f"Error sending notification to group: {e}")
 
 # --- КОМАНДЫ ---
 @bot.message_handler(commands=['start', 'auto'])
